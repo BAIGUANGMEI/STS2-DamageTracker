@@ -19,9 +19,12 @@
 
 ## 安装方式
 
+
 将模组所需文件放入游戏根目录的 `mods` 目录中。（若没有则需要新建）
 
-需要：
+请在 ![Releases](https://github.com/BAIGUANGMEI/STS2-DamageTracker/releases) 页面下载最新版本的模组包，解压到 `mods` 目录中。
+
+包含：
 
 - `DamageTracker.dll`
 - `DamageTracker.pck`
