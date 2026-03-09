@@ -40,8 +40,13 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
     private Label? _metaLabel;
     private VBoxContainer? _rows;
     private Label? _emptyLabel;
+    private Control? _columnHeadings;
+    private Control? _separator;
+    private Button? _toggleBtn;
     private bool _isDragging;
     private Vector2 _dragOffset;
+    private bool _expanded = true;
+    private OverlayState? _lastState;
 
     public static void EnsureCreated()
     {
@@ -66,23 +71,17 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
 
     public override void _Ready()
     {
-        _root = new Control
+        _root = new PanelContainer
         {
             Name = "Root",
-            MouseFilter = Control.MouseFilterEnum.Pass,
-            OffsetLeft = 16, OffsetTop = 16,
-            OffsetRight = 460, OffsetBottom = 300,
-            CustomMinimumSize = new Vector2(440, 0)
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            Position = new Vector2(16, 16),
+            CustomMinimumSize = new Vector2(440, 0),
+            Size = new Vector2(440, 0)
         };
 
-        // Background panel
-        PanelContainer bg = new()
-        {
-            MouseFilter = Control.MouseFilterEnum.Stop,
-            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin
-        };
-        bg.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        // Background panel (the root itself)
+        PanelContainer bg = (PanelContainer)_root;
         bg.GuiInput += OnGuiInput;
         bg.AddThemeStyleboxOverride("panel", new StyleBoxFlat
         {
@@ -110,10 +109,12 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
         col.AddChild(_metaLabel);
 
         // ── Column headings ──
-        col.AddChild(BuildColumnHeadings());
+        _columnHeadings = BuildColumnHeadings();
+        col.AddChild(_columnHeadings);
 
         // ── Thin separator ──
-        col.AddChild(HLine());
+        _separator = HLine();
+        col.AddChild(_separator);
 
         // ── Player rows ──
         _rows = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
@@ -127,7 +128,6 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
 
         pad.AddChild(col);
         bg.AddChild(pad);
-        _root.AddChild(bg);
         AddChild(_root);
 
         ApplyState(RunDamageTrackerService.BuildOverlayState());
@@ -146,8 +146,24 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
         _headerStatus = MakeLabel("IDLE", 11, DimGray);
         _headerStatus.HorizontalAlignment = HorizontalAlignment.Right;
 
+        _toggleBtn = new Button
+        {
+            Text = "\u25bc",
+            CustomMinimumSize = new Vector2(24, 24),
+            MouseFilter = Control.MouseFilterEnum.Stop,
+            FocusMode = Control.FocusModeEnum.None
+        };
+        _toggleBtn.AddThemeFontSizeOverride("font_size", 12);
+        _toggleBtn.AddThemeStyleboxOverride("normal", new StyleBoxFlat { BgColor = new Color("FFFFFF10"), CornerRadiusTopLeft = 3, CornerRadiusTopRight = 3, CornerRadiusBottomLeft = 3, CornerRadiusBottomRight = 3 });
+        _toggleBtn.AddThemeStyleboxOverride("hover", new StyleBoxFlat { BgColor = new Color("FFFFFF20"), CornerRadiusTopLeft = 3, CornerRadiusTopRight = 3, CornerRadiusBottomLeft = 3, CornerRadiusBottomRight = 3 });
+        _toggleBtn.AddThemeStyleboxOverride("pressed", new StyleBoxFlat { BgColor = new Color("FFFFFF30"), CornerRadiusTopLeft = 3, CornerRadiusTopRight = 3, CornerRadiusBottomLeft = 3, CornerRadiusBottomRight = 3 });
+        _toggleBtn.AddThemeColorOverride("font_color", Gray);
+        _toggleBtn.Pressed += OnToggle;
+
         h.AddChild(title);
         h.AddChild(_headerStatus);
+        h.AddChild(Spacer(4));
+        h.AddChild(_toggleBtn);
         return h;
     }
 
@@ -320,6 +336,86 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
         return frame;
     }
 
+    // ── Toggle expand / collapse ───────────────────────────────
+
+    private void OnToggle()
+    {
+        _expanded = !_expanded;
+        if (_toggleBtn != null)
+            _toggleBtn.Text = _expanded ? "\u25bc" : "\u25b6";
+
+        // Adjust root width for compact vs expanded
+        if (_root != null)
+        {
+            float w = _expanded ? 440 : 220;
+            _root.CustomMinimumSize = new Vector2(w, 0);
+            _root.Size = new Vector2(w, 0);
+        }
+
+        if (_lastState != null)
+            ApplyState(_lastState);
+    }
+
+    // ── Compact row (icon + name + total only) ────────────────
+
+    private Control CreateCompactRow(PlayerDamageSnapshot snap, float ratio)
+    {
+        Color theme = GetCharTheme(snap.CharacterName);
+        bool active = snap.IsActive;
+
+        PanelContainer card = new()
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            CustomMinimumSize = new Vector2(0, 28)
+        };
+        card.AddThemeStyleboxOverride("panel", new StyleBoxFlat
+        {
+            BgColor = new Color(theme, active ? 0.18f : 0.08f),
+            BorderColor = active ? new Color(theme, 0.9f) : new Color(theme, 0.3f),
+            BorderWidthLeft = 3,
+            BorderWidthTop = 0, BorderWidthRight = 0, BorderWidthBottom = 0,
+            CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4,
+            CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4
+        });
+
+        MarginContainer mp = new();
+        mp.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        mp.AddThemeConstantOverride("margin_left", 6);
+        mp.AddThemeConstantOverride("margin_right", 6);
+        mp.AddThemeConstantOverride("margin_top", 2);
+        mp.AddThemeConstantOverride("margin_bottom", 2);
+
+        HBoxContainer row = new() { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        row.AddThemeConstantOverride("separation", 0);
+
+        // Avatar 24x24
+        row.AddChild(BuildAvatar(snap, 24));
+        row.AddChild(Spacer(6));
+
+        // Name only (no character subtitle)
+        Label nameLabel = MakeLabel(snap.DisplayName, 12, active ? theme.Lightened(0.3f) : White);
+        nameLabel.ClipText = true;
+        nameLabel.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        row.AddChild(nameLabel);
+
+        // Total damage
+        row.AddChild(StatCell(RunDamageTrackerService.Format(snap.TotalDamage), Yellow, 62));
+
+        mp.AddChild(row);
+        card.AddChild(mp);
+
+        card.Modulate = new Color(1, 1, 1, 0.3f);
+        card.TreeEntered += () =>
+        {
+            Tween? tw = card.CreateTween();
+            tw?.TweenProperty(card, "modulate", new Color(1, 1, 1, 1), 0.35f)
+               .SetTrans(Tween.TransitionType.Cubic)
+               .SetEase(Tween.EaseType.Out);
+        };
+
+        return card;
+    }
+
     // ── State update ───────────────────────────────────────────
 
     private void OnChanged(OverlayState s)
@@ -332,9 +428,16 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
     {
         if (_headerStatus == null || _metaLabel == null || _rows == null || _emptyLabel == null) return;
 
+        _lastState = s;
+
         bool live = s.CombatActive;
         _headerStatus.Text = live ? "LIVE" : "IDLE";
         _headerStatus.AddThemeColorOverride("font_color", live ? Green : DimGray);
+
+        // Hide meta, column headings, separator in compact mode
+        _metaLabel.Visible = _expanded;
+        if (_columnHeadings != null) _columnHeadings.Visible = _expanded;
+        if (_separator != null) _separator.Visible = _expanded;
 
         _metaLabel.Text = $"Run {s.RunToken} | Combat #{s.CombatIndex} | Players {s.Players.Count}";
 
@@ -349,7 +452,7 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
         for (int i = 0; i < s.Players.Count; i++)
         {
             float ratio = teamTotal > 0 ? (float)(s.Players[i].TotalDamage / teamTotal) : 0f;
-            _rows.AddChild(CreateRow(s.Players[i], ratio));
+            _rows.AddChild(_expanded ? CreateRow(s.Players[i], ratio) : CreateCompactRow(s.Players[i], ratio));
         }
     }
 

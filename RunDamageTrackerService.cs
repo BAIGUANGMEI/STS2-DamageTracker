@@ -15,6 +15,7 @@ public static class RunDamageTrackerService
     private static int _combatIndex;
     private static bool _combatActive;
     private static ulong? _activePlayerKey;
+    private static int _damageCounter;
 
     public static event Action<OverlayState>? Changed;
 
@@ -53,6 +54,7 @@ public static class RunDamageTrackerService
             _combatIndex = 0;
             _combatActive = false;
             _activePlayerKey = null;
+            _damageCounter = 0;
         }
 
         Publish();
@@ -60,6 +62,8 @@ public static class RunDamageTrackerService
 
     public static void BeginCombat(object? combatState)
     {
+        SaveState();
+
         lock (SyncRoot)
         {
             _combatIndex++;
@@ -126,10 +130,7 @@ public static class RunDamageTrackerService
         {
             if (!ReflectionHelpers.TryResolvePlayerHandle(cardSource, out handle))
             {
-                if (!ReflectionHelpers.TryResolvePlayerHandle(target, out handle))
-                {
-                    return;
-                }
+                return;
             }
         }
 
@@ -143,7 +144,11 @@ public static class RunDamageTrackerService
             if (damage > snapshot.MaxHitDamage)
                 snapshot.MaxHitDamage = damage;
             snapshot.LastUpdatedUtc = DateTime.UtcNow;
+            _damageCounter++;
         }
+
+        if (_damageCounter % 10 == 0)
+            SaveState();
 
         Publish();
     }

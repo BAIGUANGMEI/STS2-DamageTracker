@@ -66,6 +66,11 @@ internal static class HookPatches
     public static void AfterDamageGivenPostfix(object[] __args)
     {
         object? dealer = __args.Length > 2 ? __args[2] : null;
+
+        // Only record damage dealt by player creatures; skip enemy/monster damage
+        if (dealer != null && !ReflectionHelpers.IsPlayerCreature(dealer))
+            return;
+
         object? result = __args.Length > 3 ? __args[3] : null;
         object? target = __args.Length > 5 ? __args[5] : null;
         object? cardSource = __args.Length > 6 ? __args[6] : null;

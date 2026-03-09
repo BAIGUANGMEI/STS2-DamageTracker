@@ -84,31 +84,35 @@ internal static class ReflectionHelpers
             return "unknown-run";
         }
 
+        // Try direct members first
         foreach (string memberName in new[] { "Seed", "RunId", "Id" })
         {
             object? value = TryGetMemberValue(runState, memberName);
             if (value != null)
             {
                 string text = value.ToString() ?? string.Empty;
-                if (!string.IsNullOrWhiteSpace(text))
-                {
+                if (!string.IsNullOrWhiteSpace(text) && !LooksLikeTypeName(text))
                     return text;
-                }
             }
         }
+
+        // Navigate Rng.StringSeed / Rng.Seed (IRunState.Rng is RunRngSet)
+        string? seedFromRng = TryGetSeedFromRng(runState);
+        if (!string.IsNullOrEmpty(seedFromRng))
+            return seedFromRng;
 
         return $"run-{RuntimeHelpers.GetHashCode(runState)}";
     }
 
     /// <summary>
     /// Resolves a stable run identifier that survives save &amp; quit.
-    /// Uses Seed (which is constant for a given run) rather than object identity.
+    /// Navigates runState.Rng.StringSeed which is constant for a given run.
     /// </summary>
     public static string ResolveStableRunId(object? runState)
     {
         if (runState == null) return string.Empty;
 
-        // Seed is the most stable identifier for a run
+        // Try direct members
         foreach (string memberName in new[] { "Seed", "RunId" })
         {
             object? value = TryGetMemberValue(runState, memberName);
@@ -120,7 +124,43 @@ internal static class ReflectionHelpers
             }
         }
 
-        return string.Empty;
+        // Navigate Rng.StringSeed / Rng.Seed
+        return TryGetSeedFromRng(runState) ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Returns true if the creature is a player character (not a monster/enemy).
+    /// </summary>
+    public static bool IsPlayerCreature(object? creature)
+    {
+        if (creature == null) return false;
+
+        object? isPlayer = TryGetMemberValue(creature, "IsPlayer");
+        if (isPlayer is bool b) return b;
+
+        object? side = TryGetMemberValue(creature, "Side");
+        if (side != null) return string.Equals(side.ToString(), "Player", StringComparison.OrdinalIgnoreCase);
+
+        return false;
+    }
+
+    private static string? TryGetSeedFromRng(object runState)
+    {
+        object? rng = TryGetMemberValue(runState, "Rng");
+        if (rng == null) return null;
+
+        foreach (string seedMember in new[] { "StringSeed", "Seed" })
+        {
+            object? seedVal = TryGetMemberValue(rng, seedMember);
+            if (seedVal != null)
+            {
+                string text = seedVal.ToString() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(text) && !LooksLikeTypeName(text))
+                    return text;
+            }
+        }
+
+        return null;
     }
 
     public static bool TryResolvePlayerHandle(object? source, out PlayerHandle handle)
