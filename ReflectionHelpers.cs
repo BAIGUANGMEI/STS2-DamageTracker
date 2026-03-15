@@ -193,7 +193,7 @@ internal static class ReflectionHelpers
             string typedDisplayName = TryGetPlatformDisplayName(typedPlayerKey)
                 ?? typedPlayer.Creature.Name
                 ?? $"Player {typedPlayerKey}";
-            string typedCharacterName = typedPlayer.Character.Title.GetFormattedText();
+            string typedCharacterName = typedPlayer.Character.Id.Entry;
             Texture2D? typedPortraitTexture = typedPlayer.Character.IconTexture;
 
             handle = new PlayerHandle(typedPlayerKey, typedDisplayName, typedCharacterName, typedPortraitTexture);
