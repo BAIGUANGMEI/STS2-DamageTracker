@@ -2,7 +2,12 @@ using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Godot;
+using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Platform;
+using MegaCrit.Sts2.Core.Runs;
 
 namespace DamageTracker;
 
@@ -79,6 +84,13 @@ internal static class ReflectionHelpers
 
     public static string ResolveRunToken(object? runState)
     {
+        if (runState is IRunState typedRunState)
+        {
+            return !string.IsNullOrWhiteSpace(typedRunState.Rng.StringSeed)
+                ? typedRunState.Rng.StringSeed
+                : $"run-{RuntimeHelpers.GetHashCode(typedRunState)}";
+        }
+
         if (runState == null)
         {
             return "unknown-run";
@@ -110,6 +122,11 @@ internal static class ReflectionHelpers
     /// </summary>
     public static string ResolveStableRunId(object? runState)
     {
+        if (runState is IRunState typedRunState)
+        {
+            return typedRunState.Rng.StringSeed ?? string.Empty;
+        }
+
         if (runState == null) return string.Empty;
 
         // Try direct members
@@ -133,6 +150,11 @@ internal static class ReflectionHelpers
     /// </summary>
     public static bool IsPlayerCreature(object? creature)
     {
+        if (creature is Creature typedCreature)
+        {
+            return typedCreature.IsPlayer || typedCreature.Side == CombatSide.Player;
+        }
+
         if (creature == null) return false;
 
         object? isPlayer = TryGetMemberValue(creature, "IsPlayer");
@@ -165,6 +187,19 @@ internal static class ReflectionHelpers
 
     public static bool TryResolvePlayerHandle(object? source, out PlayerHandle handle)
     {
+        if (TryResolveTypedPlayer(source, out Player? typedPlayer) && typedPlayer != null)
+        {
+            ulong typedPlayerKey = typedPlayer.NetId;
+            string typedDisplayName = TryGetPlatformDisplayName(typedPlayerKey)
+                ?? typedPlayer.Creature.Name
+                ?? $"Player {typedPlayerKey}";
+            string typedCharacterName = typedPlayer.Character.Title.GetFormattedText();
+            Texture2D? typedPortraitTexture = typedPlayer.Character.IconTexture;
+
+            handle = new PlayerHandle(typedPlayerKey, typedDisplayName, typedCharacterName, typedPortraitTexture);
+            return true;
+        }
+
         if (source == null)
         {
             handle = default;
@@ -191,6 +226,12 @@ internal static class ReflectionHelpers
 
     public static bool TryResolveDamageAmount(object? value, out decimal amount)
     {
+        if (value is DamageResult typedDamageResult)
+        {
+            amount = typedDamageResult.UnblockedDamage;
+            return amount > 0;
+        }
+
         if (TryConvertToDecimal(value, out amount))
         {
             return true;
@@ -240,6 +281,28 @@ internal static class ReflectionHelpers
         }
 
         return null;
+    }
+
+    private static bool TryResolveTypedPlayer(object? source, out Player? player)
+    {
+        switch (source)
+        {
+            case Player typedPlayer:
+                player = typedPlayer;
+                return true;
+            case Creature creature when creature.Player != null:
+                player = creature.Player;
+                return true;
+            case Creature creature when creature.PetOwner != null:
+                player = creature.PetOwner;
+                return true;
+            case CardModel card when card.Owner != null:
+                player = card.Owner;
+                return true;
+            default:
+                player = null;
+                return false;
+        }
     }
 
     private static ulong? TryGetUnsignedId(object source)
