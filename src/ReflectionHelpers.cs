@@ -486,6 +486,114 @@ internal static class ReflectionHelpers
         return null;
     }
 
+    /// <summary>
+    /// 遍历生物身上的所有Power，调用callback处理
+    /// </summary>
+    public static void IteratePowers(object? creature, System.Action<string, int, object?> callback)
+    {
+        if (creature == null) return;
+        
+        try
+        {
+            // 尝试获取Powers属性（公开API）
+            var powersProp = creature.GetType().GetProperty("Powers", BindingFlags.Public | BindingFlags.Instance);
+            if (powersProp == null)
+            {
+                GD.Print("[DamageTracker] IteratePowers: no Powers property found");
+                return;
+            }
+            
+            var powers = powersProp.GetValue(creature) as System.Collections.IEnumerable;
+            if (powers == null)
+            {
+                GD.Print("[DamageTracker] IteratePowers: Powers is null");
+                return;
+            }
+            
+            int count = 0;
+            foreach (var power in powers)
+            {
+                count++;
+                if (power == null) continue;
+                
+                // 获取Power类型名称
+                var type = power.GetType();
+                var powerTypeName = type.Name; // e.g., "PoisonPower", "DoomPower"
+                var simpleName = powerTypeName.Replace("Power", "");
+                
+                // 获取Amount
+                var amountProp = type.GetProperty("Amount");
+                var amount = amountProp?.GetValue(power) as int? ?? 0;
+                
+                // 获取Applier - 通过属性访问
+                var applierProp = type.GetProperty("Applier");
+                var applier = applierProp?.GetValue(power);
+                
+                callback(simpleName, amount, applier);
+            }
+            GD.Print($"[DamageTracker] IteratePowers: iterated over {count} powers");
+        }
+        catch (System.Exception ex)
+        {
+            GD.PrintErr($"[DamageTracker] IteratePowers error: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 获取指定类型Power的Applier
+    /// </summary>
+    public static void GetPowerApplier(object? creature, string powerTypeName, out object? applier, out int amount)
+    {
+        applier = null;
+        amount = 0;
+        
+        if (creature == null) return;
+        
+        try
+        {
+            // 尝试获取Powers集合
+            var powersField = creature.GetType().GetField("Powers", BindingFlags.Public | BindingFlags.Instance);
+            if (powersField == null)
+            {
+                powersField = creature.GetType().GetField("_powers", BindingFlags.Public | BindingFlags.Instance);
+            }
+            
+            if (powersField == null) return;
+            
+            var powers = powersField.GetValue(creature) as System.Collections.IEnumerable;
+            if (powers == null) return;
+            
+            foreach (var power in powers)
+            {
+                if (power == null) continue;
+                
+                var type = power.GetType();
+                var typeName = type.Name;
+                
+                // 检查是否是目标Power类型
+                if (!typeName.StartsWith(powerTypeName, StringComparison.OrdinalIgnoreCase) &&
+                    !typeName.Equals(powerTypeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                
+                // 获取Amount
+                var amountProp = type.GetProperty("Amount");
+                amount = amountProp?.GetValue(power) as int? ?? 0;
+                
+                // 获取Applier
+                var applierField = type.GetField("_applier", BindingFlags.Public | BindingFlags.Instance);
+                applier = applierField?.GetValue(power);
+                
+                return;
+            }
+        }
+        catch
+        {
+            // 忽略反射错误
+        }
+    }
+
     private static bool LooksLikeTypeName(string value)
     {
         return value.Contains('.', StringComparison.Ordinal) || value.Contains('+', StringComparison.Ordinal);

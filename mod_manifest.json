@@ -3,5 +3,5 @@
   "name": "Damage Tracker",
   "author": "BAIGUANGMEI",
   "description": "Tracks each player's total run damage and shows a live overlay.",
-  "version": "0.2.0"
+  "version": "0.3.0"
 }

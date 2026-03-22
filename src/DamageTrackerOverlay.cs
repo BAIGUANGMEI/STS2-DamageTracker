@@ -17,15 +17,30 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
     private static Dictionary<string, string> LoadLocStrings()
     {
         string lang = ResolveGameLanguage();
-        string path = $"res://localization/{lang}/damage_tracker.json";
-        if (!Godot.FileAccess.FileExists(path) && lang != "eng")
-            path = "res://localization/eng/damage_tracker.json";
-
-        if (!Godot.FileAccess.FileExists(path))
-            return new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
-
-        using Godot.FileAccess file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
+        
+        // Debug: list files in localization folder
+        string[] files = Godot.DirAccess.GetFilesAt($"res://assets/localization/{lang}");
+        GD.Print($"[DamageTracker] {lang} folder files: {string.Join(", ", files)}");
+        
+        // Use res:// path - requires .pck file to be loaded
+        string resPath = $"res://assets/localization/{lang}/damage_tracker.json";
+        GD.Print($"[DamageTracker] LoadLocStrings: trying res:// path = {resPath}");
+        
+        if (!Godot.FileAccess.FileExists(resPath))
+        {
+            GD.Print($"[DamageTracker] LoadLocStrings: res:// path not found, trying eng fallback");
+            if (lang != "eng")
+                resPath = $"res://assets/localization/eng/damage_tracker.json";
+            else
+            {
+                GD.Print("[DamageTracker] LoadLocStrings: localization file not found!");
+                return new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+            }
+        }
+        
+        using Godot.FileAccess file = Godot.FileAccess.Open(resPath, Godot.FileAccess.ModeFlags.Read);
         string json = file?.GetAsText() ?? "{}";
+        GD.Print($"[DamageTracker] LoadLocStrings: loaded json from {resPath}");
         return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
                ?? new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
     }
@@ -39,12 +54,17 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
             object? inst = locMgr?.GetProperty("Instance",
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null);
             string? lang = inst?.GetType().GetProperty("Language")?.GetValue(inst) as string;
-            if (!string.IsNullOrEmpty(lang)) return lang;
+            if (!string.IsNullOrEmpty(lang))
+            {
+                GD.Print($"[DamageTracker] ResolveGameLanguage: LocManager.Language = {lang}");
+                return lang;
+            }
         }
-        catch { /* fallback below */ }
+        catch (System.Exception ex) { GD.Print($"[DamageTracker] ResolveGameLanguage: LocManager error {ex.Message}"); }
 
         // Fallback: map OS locale to STS2 three-letter code
         string locale = OS.GetLocaleLanguage().ToLowerInvariant();
+        GD.Print($"[DamageTracker] ResolveGameLanguage: OS locale = {locale}");
         if (locale.StartsWith("zh")) return "zhs";
         if (locale.StartsWith("ja")) return "jpn";
         if (locale.StartsWith("ko")) return "kor";
@@ -100,14 +120,17 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
     private Vector2 _dragOffset;
     private bool _expanded = true;
     private OverlayState? _lastState;
+    private static bool _pendingCreate;
 
-    public static void EnsureCreated()
+    /// <summary>
+    /// Schedule overlay creation on next frame (safe to call from mod init before game loop is ready).
+    /// </summary>
+    public static void ScheduleCreate()
     {
-        if (IsInstanceValid(_instance)) return;
-        if (Engine.GetMainLoop() is not SceneTree tree || tree.Root == null) return;
-        _instance = new DamageTrackerOverlay();
-        tree.Root.CallDeferred(Node.MethodName.AddChild, _instance);
+        _pendingCreate = true;
     }
+
+
 
     public override void _EnterTree()
     {
@@ -620,5 +643,31 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
         if (p.Length == 0) return "?";
         if (p.Length == 1) return p[0].Length >= 2 ? p[0][..2].ToUpperInvariant() : p[0].ToUpperInvariant();
         return string.Concat(p[0][0], p[1][0]).ToUpperInvariant();
+    }
+
+    public override void _Process(double _)
+    {
+        if (!_pendingCreate) return;
+        _pendingCreate = false;
+        GD.Print("[DamageTracker] _Process: calling EnsureCreated...");
+        EnsureCreated();
+    }
+
+    public static void EnsureCreated()
+    {
+        if (IsInstanceValid(_instance))
+        {
+            GD.Print("[DamageTracker] EnsureCreated: already exists, skipping");
+            return;
+        }
+        if (Engine.GetMainLoop() is not SceneTree tree || tree.Root == null)
+        {
+            GD.Print("[DamageTracker] EnsureCreated: game loop not ready, re-scheduling");
+            _pendingCreate = true;
+            return;
+        }
+        GD.Print("[DamageTracker] EnsureCreated: creating overlay now!");
+        _instance = new DamageTrackerOverlay();
+        tree.Root.CallDeferred(Node.MethodName.AddChild, _instance);
     }
 }

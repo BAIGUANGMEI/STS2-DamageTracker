@@ -25,3 +25,8 @@ Desktop.ini
 exports/
 build/
 dist/
+
+
+# game-src 
+game-src/
+logs/
