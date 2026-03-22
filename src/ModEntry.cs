@@ -31,6 +31,8 @@ public static class ModEntry
         PatchHook(nameof(Hook.AfterCombatEnd), nameof(HookPatches.AfterCombatEndPostfix));
         PatchHook(nameof(Hook.AfterPlayerTurnStart), nameof(HookPatches.AfterPlayerTurnStartPostfix));
         PatchHook(nameof(Hook.AfterDamageGiven), nameof(HookPatches.AfterDamageGivenPostfix));
+        PatchHook(nameof(Hook.AfterSideTurnStart), nameof(HookPatches.AfterSideTurnStartPostfix));
+        PatchHook(nameof(Hook.AfterDiedToDoom), nameof(HookPatches.AfterDiedToDoomPostfix));
 
         // 手动加载PCK文件到res://
         string modDir = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? "";
@@ -122,5 +124,27 @@ internal static class HookPatches
             return;
 
         RunDamageTrackerService.RecordDamage(dealer, results, target, cardSource);
+    }
+
+    // Hook signature:
+    // AfterSideTurnStart(CombatState combatState, CombatSide side)
+    public static void AfterSideTurnStartPostfix(CombatState combatState, CombatSide side)
+    {
+        // 敌方回合开始时，检测Poison等状态伤害
+        if (side == CombatSide.Enemy)
+        {
+            RunDamageTrackerService.ProcessStatusDamageOnTurnStart(combatState);
+        }
+    }
+
+    // Hook signature:
+    // AfterDiedToDoom(CombatState combatState, IReadOnlyList<Creature> creatures)
+    public static void AfterDiedToDoomPostfix(CombatState combatState, System.Collections.Generic.IReadOnlyList<Creature>? creatures)
+    {
+        // 灾厄斩杀伤害归属
+        if (creatures != null)
+        {
+            RunDamageTrackerService.RecordDoomDamage(combatState, creatures);
+        }
     }
 }
