@@ -6,18 +6,11 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-    <!-- 改成你的杀戮尖塔2目录 -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);game-src\**</DefaultItemExcludes>
+
     <Sts2Dir>C:\Users\32018\sortware\steam\steamapps\common\Slay the Spire 2</Sts2Dir>
     <Sts2DataDir>$(Sts2Dir)\data_sts2_windows_x86_64</Sts2DataDir>
   </PropertyGroup>
-
-    <PropertyGroup>
-    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <Compile Include="src/**/*.cs" />
-  </ItemGroup>
 
   <ItemGroup>
     <Reference Include="sts2">
@@ -36,10 +29,9 @@
     </Reference>
   </ItemGroup>
 
-  <!-- 自动复制dll和json -->
   <Target Name="Copy Mod" AfterTargets="PostBuildEvent">
     <Message Text="Copying mod to Slay the Spire 2 mods folder..." Importance="high" />
-    <MakeDir Directories="$(Sts2Dir)\mods\" />
+    <MakeDir Directories="$(Sts2Dir)\mods\$(MSBuildProjectName)\" />
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(Sts2Dir)\mods\$(MSBuildProjectName)\" />
     <Copy SourceFiles="$(ProjectDir)DamageTracker.json" DestinationFolder="$(Sts2Dir)\mods\$(MSBuildProjectName)\" />
   </Target>

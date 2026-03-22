@@ -1,6 +1,6 @@
 ﻿Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2012
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DamageTracker", "DamageTracker.csproj", "{D0740DD7-2BC4-47E6-89F0-02820BC5FF08}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DamageTracker", "DamageTracker.csproj", "{19674592-127B-4CBC-92A4-F1E453B629A5}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -9,11 +9,11 @@ Global
 	ExportRelease|Any CPU = ExportRelease|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{D0740DD7-2BC4-47E6-89F0-02820BC5FF08}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{D0740DD7-2BC4-47E6-89F0-02820BC5FF08}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{D0740DD7-2BC4-47E6-89F0-02820BC5FF08}.ExportDebug|Any CPU.ActiveCfg = ExportDebug|Any CPU
-		{D0740DD7-2BC4-47E6-89F0-02820BC5FF08}.ExportDebug|Any CPU.Build.0 = ExportDebug|Any CPU
-		{D0740DD7-2BC4-47E6-89F0-02820BC5FF08}.ExportRelease|Any CPU.ActiveCfg = ExportRelease|Any CPU
-		{D0740DD7-2BC4-47E6-89F0-02820BC5FF08}.ExportRelease|Any CPU.Build.0 = ExportRelease|Any CPU
+		{19674592-127B-4CBC-92A4-F1E453B629A5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{19674592-127B-4CBC-92A4-F1E453B629A5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{19674592-127B-4CBC-92A4-F1E453B629A5}.ExportDebug|Any CPU.ActiveCfg = ExportDebug|Any CPU
+		{19674592-127B-4CBC-92A4-F1E453B629A5}.ExportDebug|Any CPU.Build.0 = ExportDebug|Any CPU
+		{19674592-127B-4CBC-92A4-F1E453B629A5}.ExportRelease|Any CPU.ActiveCfg = ExportRelease|Any CPU
+		{19674592-127B-4CBC-92A4-F1E453B629A5}.ExportRelease|Any CPU.Build.0 = ExportRelease|Any CPU
 	EndGlobalSection
 EndGlobal

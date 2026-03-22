@@ -32,6 +32,20 @@ public static class ModEntry
         PatchHook(nameof(Hook.AfterPlayerTurnStart), nameof(HookPatches.AfterPlayerTurnStartPostfix));
         PatchHook(nameof(Hook.AfterDamageGiven), nameof(HookPatches.AfterDamageGivenPostfix));
 
+        // 手动加载PCK文件到res://
+        string modDir = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? "";
+        string pckPath = System.IO.Path.Combine(modDir, "DamageTracker.pck");
+        GD.Print($"[DamageTracker] PCK path: {pckPath}, exists: {System.IO.File.Exists(pckPath)}");
+        if (System.IO.File.Exists(pckPath))
+        {
+            bool success = ProjectSettings.LoadResourcePack(pckPath);
+            GD.Print($"[DamageTracker] LoadResourcePack result: {success}");
+        }
+        else
+        {
+            GD.PrintErr($"[DamageTracker] PCK file not found: {pckPath}");
+        }
+
         // Write to log file for debugging
         string logDir = OS.GetUserDataDir();
         string logPath = Path.Combine(logDir, "..", "DamageTracker_debug.log");

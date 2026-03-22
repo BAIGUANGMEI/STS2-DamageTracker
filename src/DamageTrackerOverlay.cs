@@ -17,15 +17,30 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
     private static Dictionary<string, string> LoadLocStrings()
     {
         string lang = ResolveGameLanguage();
-        string path = $"res://assets/localization/{lang}/damage_tracker.json";
-        if (!Godot.FileAccess.FileExists(path) && lang != "eng")
-            path = "res://assets/localization/eng/damage_tracker.json";
-
-        if (!Godot.FileAccess.FileExists(path))
-            return new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
-
-        using Godot.FileAccess file = Godot.FileAccess.Open(path, Godot.FileAccess.ModeFlags.Read);
+        
+        // Debug: list files in localization folder
+        string[] files = Godot.DirAccess.GetFilesAt($"res://assets/localization/{lang}");
+        GD.Print($"[DamageTracker] {lang} folder files: {string.Join(", ", files)}");
+        
+        // Use res:// path - requires .pck file to be loaded
+        string resPath = $"res://assets/localization/{lang}/damage_tracker.json";
+        GD.Print($"[DamageTracker] LoadLocStrings: trying res:// path = {resPath}");
+        
+        if (!Godot.FileAccess.FileExists(resPath))
+        {
+            GD.Print($"[DamageTracker] LoadLocStrings: res:// path not found, trying eng fallback");
+            if (lang != "eng")
+                resPath = $"res://assets/localization/eng/damage_tracker.json";
+            else
+            {
+                GD.Print("[DamageTracker] LoadLocStrings: localization file not found!");
+                return new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+            }
+        }
+        
+        using Godot.FileAccess file = Godot.FileAccess.Open(resPath, Godot.FileAccess.ModeFlags.Read);
         string json = file?.GetAsText() ?? "{}";
+        GD.Print($"[DamageTracker] LoadLocStrings: loaded json from {resPath}");
         return JsonSerializer.Deserialize<Dictionary<string, string>>(json)
                ?? new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
     }
@@ -39,12 +54,17 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
             object? inst = locMgr?.GetProperty("Instance",
                 System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)?.GetValue(null);
             string? lang = inst?.GetType().GetProperty("Language")?.GetValue(inst) as string;
-            if (!string.IsNullOrEmpty(lang)) return lang;
+            if (!string.IsNullOrEmpty(lang))
+            {
+                GD.Print($"[DamageTracker] ResolveGameLanguage: LocManager.Language = {lang}");
+                return lang;
+            }
         }
-        catch { /* fallback below */ }
+        catch (System.Exception ex) { GD.Print($"[DamageTracker] ResolveGameLanguage: LocManager error {ex.Message}"); }
 
         // Fallback: map OS locale to STS2 three-letter code
         string locale = OS.GetLocaleLanguage().ToLowerInvariant();
+        GD.Print($"[DamageTracker] ResolveGameLanguage: OS locale = {locale}");
         if (locale.StartsWith("zh")) return "zhs";
         if (locale.StartsWith("ja")) return "jpn";
         if (locale.StartsWith("ko")) return "kor";
