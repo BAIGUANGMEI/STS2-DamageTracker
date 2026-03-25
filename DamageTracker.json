@@ -7,5 +7,5 @@
   "has_pck": true,
   "has_dll": true,
   "dependencies": [],
-  "affects_gameplay": true
+  "affects_gameplay": false
 }
