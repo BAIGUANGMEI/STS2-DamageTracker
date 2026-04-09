@@ -3,6 +3,7 @@ using Godot;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
@@ -31,8 +32,9 @@ public static class ModEntry
         PatchHook(nameof(Hook.AfterCombatEnd), nameof(HookPatches.AfterCombatEndPostfix));
         PatchHook(nameof(Hook.AfterPlayerTurnStart), nameof(HookPatches.AfterPlayerTurnStartPostfix));
         PatchHook(nameof(Hook.AfterDamageGiven), nameof(HookPatches.AfterDamageGivenPostfix));
-        PatchHook(nameof(Hook.AfterSideTurnStart), nameof(HookPatches.AfterSideTurnStartPostfix));
         PatchHook(nameof(Hook.AfterDiedToDoom), nameof(HookPatches.AfterDiedToDoomPostfix));
+        PatchMethod(typeof(PoisonPower), nameof(PoisonPower.AfterSideTurnStart), nameof(StatusPowerPatches.PoisonAfterSideTurnStartPrefix), nameof(StatusPowerPatches.PoisonAfterSideTurnStartPostfix));
+        PatchMethod(typeof(DoomPower), nameof(DoomPower.DoomKill), nameof(StatusPowerPatches.DoomKillPrefix));
 
         // 手动加载PCK文件到res://
         string modDir = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) ?? "";
@@ -70,6 +72,22 @@ public static class ModEntry
             ?? throw new MissingMethodException(typeof(HookPatches).FullName, postfixName);
 
         _harmony!.Patch(original, postfix: new HarmonyMethod(postfix));
+    }
+
+    private static void PatchMethod(Type ownerType, string methodName, string? prefixName = null, string? postfixName = null)
+    {
+        MethodInfo original = AccessTools.Method(ownerType, methodName)
+            ?? throw new MissingMethodException(ownerType.FullName, methodName);
+        HarmonyMethod? prefix = prefixName != null
+            ? new HarmonyMethod(AccessTools.Method(typeof(StatusPowerPatches), prefixName)
+                ?? throw new MissingMethodException(typeof(StatusPowerPatches).FullName, prefixName))
+            : null;
+        HarmonyMethod? postfix = postfixName != null
+            ? new HarmonyMethod(AccessTools.Method(typeof(StatusPowerPatches), postfixName)
+                ?? throw new MissingMethodException(typeof(StatusPowerPatches).FullName, postfixName))
+            : null;
+
+        _harmony!.Patch(original, prefix: prefix, postfix: postfix);
     }
 }
 
@@ -123,18 +141,10 @@ internal static class HookPatches
         if (dealer != null && !ReflectionHelpers.IsPlayerCreature(dealer))
             return;
 
-        RunDamageTrackerService.RecordDamage(dealer, results, target, cardSource);
-    }
+        if (RunDamageTrackerService.TryRecordPoisonDamage(target, results))
+            return;
 
-    // Hook signature:
-    // AfterSideTurnStart(CombatState combatState, CombatSide side)
-    public static void AfterSideTurnStartPostfix(CombatState combatState, CombatSide side)
-    {
-        // 敌方回合开始时，检测Poison等状态伤害
-        if (side == CombatSide.Enemy)
-        {
-            RunDamageTrackerService.ProcessStatusDamageOnTurnStart(combatState);
-        }
+        RunDamageTrackerService.RecordDamage(dealer, results, target, cardSource);
     }
 
     // Hook signature:
@@ -146,5 +156,23 @@ internal static class HookPatches
         {
             RunDamageTrackerService.RecordDoomDamage(combatState, creatures);
         }
+    }
+}
+
+internal static class StatusPowerPatches
+{
+    public static void PoisonAfterSideTurnStartPrefix(PoisonPower __instance, CombatSide side, out object? __state)
+    {
+        __state = RunDamageTrackerService.BeginPoisonTracking(__instance, side);
+    }
+
+    public static void PoisonAfterSideTurnStartPostfix(ref Task __result, object? __state)
+    {
+        __result = RunDamageTrackerService.CompletePoisonTrackingAsync(__result, __state);
+    }
+
+    public static void DoomKillPrefix(System.Collections.Generic.IReadOnlyList<Creature> creatures)
+    {
+        RunDamageTrackerService.CapturePendingDoomDamage(creatures);
     }
 }

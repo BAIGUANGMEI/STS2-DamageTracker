@@ -8,7 +8,7 @@
 
     <DefaultItemExcludes>$(DefaultItemExcludes);game-src\**</DefaultItemExcludes>
 
-    <Sts2Dir>C:\Users\32018\sortware\steam\steamapps\common\Slay the Spire 2</Sts2Dir>
+    <Sts2Dir>C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2</Sts2Dir>
     <Sts2DataDir>$(Sts2Dir)\data_sts2_windows_x86_64</Sts2DataDir>
   </PropertyGroup>
 

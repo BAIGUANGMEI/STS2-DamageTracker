@@ -224,6 +224,29 @@ internal static class ReflectionHelpers
         return true;
     }
 
+    public static IEnumerable<PlayerHandle> EnumeratePlayerHandles(object? source)
+    {
+        if (source == null)
+        {
+            yield break;
+        }
+
+        HashSet<ulong> seenPlayerKeys = new();
+
+        foreach (object player in EnumeratePlayers(source))
+        {
+            if (!TryResolvePlayerHandle(player, out PlayerHandle handle))
+            {
+                continue;
+            }
+
+            if (seenPlayerKeys.Add(handle.PlayerKey))
+            {
+                yield return handle;
+            }
+        }
+    }
+
     public static bool TryResolveDamageAmount(object? value, out decimal amount)
     {
         if (value is DamageResult typedDamageResult)
@@ -302,6 +325,36 @@ internal static class ReflectionHelpers
             default:
                 player = null;
                 return false;
+        }
+    }
+
+    private static IEnumerable<object> EnumeratePlayers(object source)
+    {
+        switch (source)
+        {
+            case IRunState runState:
+                foreach (Player player in runState.Players)
+                {
+                    yield return player;
+                }
+                yield break;
+            case CombatState combatState:
+                foreach (Player player in combatState.Players)
+                {
+                    yield return player;
+                }
+                yield break;
+        }
+
+        if (TryGetMemberValue(source, "Players") is System.Collections.IEnumerable players)
+        {
+            foreach (object? player in players)
+            {
+                if (player != null)
+                {
+                    yield return player;
+                }
+            }
         }
     }
 

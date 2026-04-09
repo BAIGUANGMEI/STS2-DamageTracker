@@ -1,8 +1,10 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Threading;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Models.Powers;
 
 namespace DamageTracker;
 
@@ -18,6 +20,8 @@ public static class RunDamageTrackerService
     private static bool _combatActive;
     private static ulong? _activePlayerKey;
     private static int _damageCounter;
+    private static readonly AsyncLocal<PoisonTrackingContext?> CurrentPoisonContext = new();
+    private static readonly Dictionary<Creature, PendingDoomDamage> PendingDoomDamageByCreature = new();
 
     public static event Action<OverlayState>? Changed;
 
@@ -25,6 +29,7 @@ public static class RunDamageTrackerService
     {
         string nextToken = ReflectionHelpers.ResolveRunToken(runState);
         string stableId = ReflectionHelpers.ResolveStableRunId(runState);
+        List<PlayerHandle> knownPlayers = ReflectionHelpers.EnumeratePlayerHandles(runState).ToList();
 
         lock (SyncRoot)
         {
@@ -57,6 +62,8 @@ public static class RunDamageTrackerService
             _combatActive = false;
             _activePlayerKey = null;
             _damageCounter = 0;
+
+            RegisterKnownPlayers(knownPlayers);
         }
 
         Publish();
@@ -64,6 +71,8 @@ public static class RunDamageTrackerService
 
     public static void BeginCombat(object? combatState)
     {
+        List<PlayerHandle> knownPlayers = ReflectionHelpers.EnumeratePlayerHandles(combatState).ToList();
+
         SaveState();
 
         lock (SyncRoot)
@@ -71,6 +80,8 @@ public static class RunDamageTrackerService
             _combatIndex++;
             _combatActive = combatState != null;
             _activePlayerKey = null;
+
+            RegisterKnownPlayers(knownPlayers);
 
             foreach (PlayerDamageSnapshot snapshot in Totals.Values)
             {
@@ -155,82 +166,6 @@ public static class RunDamageTrackerService
         Publish();
     }
 
-    /// <summary>
-    /// 处理回合开始时的状态伤害（如Poison）
-    /// 在敌方回合开始时调用，检测并记录Poison伤害
-    /// </summary>
-    public static void ProcessStatusDamageOnTurnStart(CombatState combatState)
-    {
-        try
-        {
-            if (combatState == null)
-            {
-                GD.PrintErr("[DamageTracker] ProcessStatusDamageOnTurnStart: combatState is null");
-                return;
-            }
-            
-            // 改用 Enemies 属性直接获取敌方生物列表，避免 GetOpponentsOf(null) 的 NRE
-            var enemies = combatState.Enemies;
-            if (enemies == null || enemies.Count == 0)
-            {
-                GD.Print("[DamageTracker] ProcessStatusDamageOnTurnStart: no enemies found");
-                return;
-            }
-            
-            GD.Print($"[DamageTracker] ProcessStatusDamageOnTurnStart: checking {enemies.Count} enemies for Poison");
-            
-            foreach (var enemy in enemies)
-            {
-                if (enemy == null) continue;
-                
-                var creatureName = enemy.Monster?.Title?.ToString() ?? "Unknown";
-                GD.Print($"[DamageTracker]   checking enemy: {creatureName}");
-                
-                if (enemy.IsDead)
-                {
-                    GD.Print($"[DamageTracker]   skip dead enemy: {creatureName}");
-                    continue;
-                }
-                
-                // 检查Poison和Doom Power
-                ReflectionHelpers.IteratePowers(enemy, (powerType, powerAmount, applier) =>
-                {
-                    GD.Print($"[DamageTracker]     power: {powerType}, amount: {powerAmount}, applier: {(applier != null ? "exists" : "null")}");
-                    
-                    // Poison 类型伤害
-                    if (powerType == "Poison" && powerAmount > 0 && applier != null)
-                    {
-                        GD.Print($"[DamageTracker]     recording Poison damage: {powerAmount} from {applier}");
-                        RecordStatusDamage(applier, powerAmount, enemy, "Poison");
-                    }
-                    
-                    // Doom 类型伤害 - 条件斩杀：只有当怪物HP <= Doom层数时才触发
-                    if (powerType == "Doom" && powerAmount > 0 && applier != null)
-                    {
-                        // 获取敌人当前HP（需要在回调外获取，这里用reflection）
-                        var enemyHp = enemy.CurrentHp;
-                        if (enemyHp > 0 && enemyHp <= powerAmount)
-                        {
-                            GD.Print($"[DamageTracker]     Doom kill! enemy HP: {enemyHp}, doom amount: {powerAmount}");
-                            RecordStatusDamage(applier, (decimal)enemyHp, enemy, "Doom");
-                        }
-                        else
-                        {
-                            GD.Print($"[DamageTracker]     Doom not lethal. enemy HP: {enemyHp}, doom amount: {powerAmount}");
-                        }
-                    }
-                });
-            }
-        }
-        catch (System.Exception ex)
-        {
-            GD.PrintErr($"[DamageTracker] ProcessStatusDamageOnTurnStart error: {ex.Message}\n{ex.StackTrace}");
-        }
-    }
-
-    /// <summary>
-    /// 记录灾厄(Doom)斩杀伤害
-    /// </summary>
     public static void RecordDoomDamage(CombatState combatState, System.Collections.Generic.IReadOnlyList<Creature>? creatures)
     {
         if (creatures == null) return;
@@ -240,20 +175,89 @@ public static class RunDamageTrackerService
             foreach (var creature in creatures)
             {
                 if (creature == null) continue;
-                
-                // 查找这个生物身上的Doom power，获取applier
-                ReflectionHelpers.GetPowerApplier(creature, "Doom", out var applier, out var amount);
-                if (amount > 0)
+
+                PendingDoomDamage? pending = null;
+                lock (SyncRoot)
                 {
-                    // Doom斩杀伤害 = doom层数
-                    decimal doomDamage = (decimal)amount;
-                    RecordStatusDamage(applier, doomDamage, creature, "Doom");
+                    if (PendingDoomDamageByCreature.TryGetValue(creature, out PendingDoomDamage? captured))
+                    {
+                        pending = captured;
+                        PendingDoomDamageByCreature.Remove(creature);
+                    }
+                }
+
+                if (pending != null && pending.Damage > 0)
+                {
+                    RecordStatusDamage(pending.Applier, pending.Damage, creature, "Doom");
                 }
             }
         }
         catch (System.Exception ex)
         {
             GD.PrintErr($"[DamageTracker] RecordDoomDamage error: {ex.Message}");
+        }
+    }
+
+    public static object? BeginPoisonTracking(PoisonPower poisonPower, CombatSide side)
+    {
+        if (poisonPower.Owner == null || side != poisonPower.Owner.Side)
+        {
+            return null;
+        }
+
+        Creature? applier = poisonPower.Applier;
+        if (applier == null || !ReflectionHelpers.IsPlayerCreature(applier))
+        {
+            return null;
+        }
+
+        PoisonTrackingContext context = new(poisonPower.Owner, applier, CurrentPoisonContext.Value);
+        CurrentPoisonContext.Value = context;
+        return context;
+    }
+
+    public static Task CompletePoisonTrackingAsync(Task originalTask, object? state)
+    {
+        if (state is not PoisonTrackingContext context)
+        {
+            return originalTask;
+        }
+
+        return AwaitAndRestorePoisonContextAsync(originalTask, context);
+    }
+
+    public static bool TryRecordPoisonDamage(object? target, object? result)
+    {
+        PoisonTrackingContext? context = CurrentPoisonContext.Value;
+        if (context == null || !ReferenceEquals(context.Target, target))
+        {
+            return false;
+        }
+
+        if (!ReflectionHelpers.TryResolveDamageAmount(result, out decimal damage) || damage <= 0)
+        {
+            return false;
+        }
+
+        RecordStatusDamage(context.Applier, damage, target, "Poison");
+        return true;
+    }
+
+    public static void CapturePendingDoomDamage(System.Collections.Generic.IReadOnlyList<Creature> creatures)
+    {
+        lock (SyncRoot)
+        {
+            foreach (Creature creature in creatures)
+            {
+                DoomPower? doom = creature.GetPower<DoomPower>();
+                Creature? applier = doom?.Applier;
+                if (creature.CurrentHp <= 0 || applier == null || !ReflectionHelpers.IsPlayerCreature(applier))
+                {
+                    continue;
+                }
+
+                PendingDoomDamageByCreature[creature] = new PendingDoomDamage(applier, creature.CurrentHp);
+            }
         }
     }
 
@@ -306,6 +310,21 @@ public static class RunDamageTrackerService
             SaveState();
 
         Publish();
+    }
+
+    private static async Task AwaitAndRestorePoisonContextAsync(Task originalTask, PoisonTrackingContext context)
+    {
+        try
+        {
+            await originalTask;
+        }
+        finally
+        {
+            if (ReferenceEquals(CurrentPoisonContext.Value, context))
+            {
+                CurrentPoisonContext.Value = context.Previous;
+            }
+        }
     }
 
     public static OverlayState BuildOverlayState()
@@ -363,6 +382,15 @@ public static class RunDamageTrackerService
             snapshot.CharacterName = handle.CharacterName;
         if (handle.PortraitTexture != null)
             snapshot.PortraitTexture = handle.PortraitTexture;
+    }
+
+    private static void RegisterKnownPlayers(IEnumerable<PlayerHandle> handles)
+    {
+        foreach (PlayerHandle handle in handles)
+        {
+            PlayerDamageSnapshot snapshot = GetOrCreate(handle);
+            ApplyHandle(snapshot, handle);
+        }
     }
 
     public static string Format(decimal value)
@@ -501,6 +529,35 @@ public sealed class PlayerDamageSnapshot
 }
 
 public readonly record struct PlayerHandle(ulong PlayerKey, string DisplayName, string? CharacterName, Texture2D? PortraitTexture);
+
+internal sealed class PoisonTrackingContext
+{
+    public PoisonTrackingContext(object target, object applier, PoisonTrackingContext? previous)
+    {
+        Target = target;
+        Applier = applier;
+        Previous = previous;
+    }
+
+    public object Target { get; }
+
+    public object Applier { get; }
+
+    public PoisonTrackingContext? Previous { get; }
+}
+
+internal sealed class PendingDoomDamage
+{
+    public PendingDoomDamage(object applier, int damage)
+    {
+        Applier = applier;
+        Damage = damage;
+    }
+
+    public object Applier { get; }
+
+    public int Damage { get; }
+}
 
 // ── Persistence models ─────────────────────────────────────
 
