@@ -134,6 +134,9 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
     private bool _hiddenToSide;
     private HiddenDockSide _hiddenSide = HiddenDockSide.Right;
     private bool _layoutRefreshQueued;
+    private bool _resetScrollPending;
+    private string? _lastAppliedRunToken;
+    private int _lastAppliedCombatIndex = -1;
     private OverlayState? _lastState;
     private static bool _pendingCreate;
 
@@ -603,6 +606,12 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
     {
         if (_rows == null || _emptyLabel == null) return;
 
+        bool resetScroll = !string.Equals(_lastAppliedRunToken, s.RunToken, System.StringComparison.Ordinal)
+            || _lastAppliedCombatIndex != s.CombatIndex;
+        _lastAppliedRunToken = s.RunToken;
+        _lastAppliedCombatIndex = s.CombatIndex;
+        _resetScrollPending |= resetScroll;
+
         _lastState = s;
 
         // Hide column headings and separator in compact mode
@@ -773,6 +782,18 @@ public sealed partial class DamageTrackerOverlay : CanvasLayer
         _bodyScroll.CustomMinimumSize = new Vector2(0, bodyHeight);
         _root.CustomMinimumSize = new Vector2(width, panelHeight);
         _root.Size = new Vector2(width, panelHeight);
+
+        int maxScroll = Mathf.Max(0, Mathf.CeilToInt(bodyContentHeight - bodyHeight));
+        if (_resetScrollPending)
+        {
+            _bodyScroll.ScrollVertical = 0;
+            _resetScrollPending = false;
+        }
+        else if (_bodyScroll.ScrollVertical > maxScroll)
+        {
+            _bodyScroll.ScrollVertical = maxScroll;
+        }
+
         ClampPos(_root.Position);
     }
 

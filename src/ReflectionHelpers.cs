@@ -189,15 +189,23 @@ internal static class ReflectionHelpers
     {
         if (TryResolveTypedPlayer(source, out Player? typedPlayer) && typedPlayer != null)
         {
-            ulong typedPlayerKey = typedPlayer.NetId;
-            string typedDisplayName = TryGetPlatformDisplayName(typedPlayerKey)
-                ?? typedPlayer.Creature.Name
-                ?? $"Player {typedPlayerKey}";
-            string typedCharacterName = typedPlayer.Character.Id.Entry;
-            Texture2D? typedPortraitTexture = typedPlayer.Character.IconTexture;
+            try
+            {
+                ulong typedPlayerKey = typedPlayer.NetId;
+                string typedDisplayName = TryGetPlatformDisplayName(typedPlayerKey)
+                    ?? typedPlayer.Creature.Name
+                    ?? typedPlayer.Character.Title?.ToString()
+                    ?? $"Player {typedPlayerKey}";
+                string typedCharacterName = typedPlayer.Character.Id.Entry;
+                Texture2D? typedPortraitTexture = typedPlayer.Character.IconTexture;
 
-            handle = new PlayerHandle(typedPlayerKey, typedDisplayName, typedCharacterName, typedPortraitTexture);
-            return true;
+                handle = new PlayerHandle(typedPlayerKey, typedDisplayName, typedCharacterName, typedPortraitTexture);
+                return true;
+            }
+            catch
+            {
+                // Fall through to reflection-based resolution if a typed property is unavailable.
+            }
         }
 
         if (source == null)
@@ -235,7 +243,15 @@ internal static class ReflectionHelpers
 
         foreach (object player in EnumeratePlayers(source))
         {
-            if (!TryResolvePlayerHandle(player, out PlayerHandle handle))
+            PlayerHandle handle;
+            try
+            {
+                if (!TryResolvePlayerHandle(player, out handle))
+                {
+                    continue;
+                }
+            }
+            catch
             {
                 continue;
             }
@@ -555,7 +571,7 @@ internal static class ReflectionHelpers
                 GD.Print("[DamageTracker] IteratePowers: no Powers property found");
                 return;
             }
-            
+
             var powers = powersProp.GetValue(creature) as System.Collections.IEnumerable;
             if (powers == null)
             {

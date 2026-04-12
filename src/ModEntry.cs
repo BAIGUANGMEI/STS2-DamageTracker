@@ -100,7 +100,7 @@ internal static class HookPatches
     public static void BeforeCombatStartPostfix(IRunState? runState, CombatState? combatState)
     {
         RunDamageTrackerService.BeginRun(runState);
-        RunDamageTrackerService.BeginCombat(combatState);
+        RunDamageTrackerService.BeginCombat(runState, combatState);
         
         // Create overlay when first combat starts (game loop is guaranteed to be ready by now)
         if (!_overlayScheduled)
@@ -121,6 +121,7 @@ internal static class HookPatches
     // AfterPlayerTurnStart(CombatState combatState, PlayerChoiceContext choiceContext, Player player)
     public static void AfterPlayerTurnStartPostfix(CombatState combatState, PlayerChoiceContext? choiceContext, Player player)
     {
+        RunDamageTrackerService.EnsurePlayersRegistered(combatState.RunState, combatState);
         RunDamageTrackerService.NotePlayer(player);
     }
 
@@ -141,7 +142,9 @@ internal static class HookPatches
         if (dealer != null && !ReflectionHelpers.IsPlayerCreature(dealer))
             return;
 
-        if (RunDamageTrackerService.TryRecordPoisonDamage(target, results))
+        RunDamageTrackerService.EnsurePlayersRegistered(combatState?.RunState, combatState);
+
+        if (RunDamageTrackerService.TryRecordPoisonDamage(dealer, target, cardSource, results))
             return;
 
         RunDamageTrackerService.RecordDamage(dealer, results, target, cardSource);

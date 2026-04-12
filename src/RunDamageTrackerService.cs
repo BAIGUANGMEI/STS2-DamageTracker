@@ -29,49 +29,57 @@ public static class RunDamageTrackerService
     {
         string nextToken = ReflectionHelpers.ResolveRunToken(runState);
         string stableId = ReflectionHelpers.ResolveStableRunId(runState);
-        List<PlayerHandle> knownPlayers = ReflectionHelpers.EnumeratePlayerHandles(runState).ToList();
+        List<PlayerHandle> knownPlayers = CollectKnownPlayers(runState);
+        bool shouldPublish;
 
         lock (SyncRoot)
         {
             // Same token in memory — skip
             if (string.Equals(_currentRunToken, nextToken, StringComparison.Ordinal))
-                return;
+            {
+                shouldPublish = RegisterKnownPlayers(knownPlayers);
+            }
 
             // Same stable ID (e.g. after save & quit) — keep accumulated data
-            if (!string.IsNullOrEmpty(stableId) &&
-                string.Equals(_stableRunId, stableId, StringComparison.Ordinal))
+            else if (!string.IsNullOrEmpty(stableId) &&
+                     string.Equals(_stableRunId, stableId, StringComparison.Ordinal))
             {
                 _currentRunToken = nextToken;
-                return;
+                shouldPublish = RegisterKnownPlayers(knownPlayers);
             }
 
             // Try restoring from disk if stable ID matches
-            if (!string.IsNullOrEmpty(stableId) && TryLoadState(stableId))
+            else if (!string.IsNullOrEmpty(stableId) && TryLoadState(stableId))
             {
                 _currentRunToken = nextToken;
                 _stableRunId = stableId;
-                Publish();
-                return;
+                shouldPublish = RegisterKnownPlayers(knownPlayers) || true;
             }
 
             // Truly new run — reset everything
-            Totals.Clear();
-            _currentRunToken = nextToken;
-            _stableRunId = stableId;
-            _combatIndex = 0;
-            _combatActive = false;
-            _activePlayerKey = null;
-            _damageCounter = 0;
+            else
+            {
+                Totals.Clear();
+                PendingDoomDamageByCreature.Clear();
+                _currentRunToken = nextToken;
+                _stableRunId = stableId;
+                _combatIndex = 0;
+                _combatActive = false;
+                _activePlayerKey = null;
+                _damageCounter = 0;
 
-            RegisterKnownPlayers(knownPlayers);
+                RegisterKnownPlayers(knownPlayers);
+                shouldPublish = true;
+            }
         }
 
-        Publish();
+        if (shouldPublish)
+            Publish();
     }
 
-    public static void BeginCombat(object? combatState)
+    public static void BeginCombat(object? runState, object? combatState)
     {
-        List<PlayerHandle> knownPlayers = ReflectionHelpers.EnumeratePlayerHandles(combatState).ToList();
+        List<PlayerHandle> knownPlayers = CollectKnownPlayers(runState, combatState);
 
         SaveState();
 
@@ -80,6 +88,7 @@ public static class RunDamageTrackerService
             _combatIndex++;
             _combatActive = combatState != null;
             _activePlayerKey = null;
+            PendingDoomDamageByCreature.Clear();
 
             RegisterKnownPlayers(knownPlayers);
 
@@ -91,6 +100,22 @@ public static class RunDamageTrackerService
         }
 
         Publish();
+    }
+
+    public static void EnsurePlayersRegistered(params object?[] sources)
+    {
+        List<PlayerHandle> knownPlayers = CollectKnownPlayers(sources);
+        if (knownPlayers.Count == 0)
+            return;
+
+        bool shouldPublish;
+        lock (SyncRoot)
+        {
+            shouldPublish = RegisterKnownPlayers(knownPlayers);
+        }
+
+        if (shouldPublish)
+            Publish();
     }
 
     public static void EndCombat()
@@ -226,10 +251,10 @@ public static class RunDamageTrackerService
         return AwaitAndRestorePoisonContextAsync(originalTask, context);
     }
 
-    public static bool TryRecordPoisonDamage(object? target, object? result)
+    public static bool TryRecordPoisonDamage(object? dealer, object? target, object? cardSource, object? result)
     {
         PoisonTrackingContext? context = CurrentPoisonContext.Value;
-        if (context == null || !ReferenceEquals(context.Target, target))
+        if (context == null || dealer != null || cardSource != null || !ReferenceEquals(context.Target, target))
         {
             return false;
         }
@@ -297,6 +322,7 @@ public static class RunDamageTrackerService
         lock (SyncRoot)
         {
             PlayerDamageSnapshot snapshot = GetOrCreate(handle.Value);
+            ApplyHandle(snapshot, handle.Value);
             snapshot.TotalDamage += damage;
             snapshot.CombatDamage += damage;
             snapshot.LastDamage = damage;
@@ -368,29 +394,68 @@ public static class RunDamageTrackerService
         PlayerDamageSnapshot created = new()
         {
             PlayerKey = handle.PlayerKey,
-            DisplayName = handle.DisplayName
+            DisplayName = handle.DisplayName,
+            CharacterName = string.IsNullOrWhiteSpace(handle.CharacterName) ? "Unknown Character" : handle.CharacterName,
+            PortraitTexture = handle.PortraitTexture
         };
         Totals.Add(handle.PlayerKey, created);
         return created;
     }
 
-    private static void ApplyHandle(PlayerDamageSnapshot snapshot, PlayerHandle handle)
+    private static bool ApplyHandle(PlayerDamageSnapshot snapshot, PlayerHandle handle)
     {
+        bool changed = false;
+
         if (!string.IsNullOrWhiteSpace(handle.DisplayName))
+        {
+            changed |= !string.Equals(snapshot.DisplayName, handle.DisplayName, StringComparison.Ordinal);
             snapshot.DisplayName = handle.DisplayName;
+        }
         if (!string.IsNullOrWhiteSpace(handle.CharacterName))
+        {
+            changed |= !string.Equals(snapshot.CharacterName, handle.CharacterName, StringComparison.Ordinal);
             snapshot.CharacterName = handle.CharacterName;
+        }
         if (handle.PortraitTexture != null)
+        {
+            changed |= !ReferenceEquals(snapshot.PortraitTexture, handle.PortraitTexture);
             snapshot.PortraitTexture = handle.PortraitTexture;
+        }
+
+        return changed;
     }
 
-    private static void RegisterKnownPlayers(IEnumerable<PlayerHandle> handles)
+    private static bool RegisterKnownPlayers(IEnumerable<PlayerHandle> handles)
     {
+        bool changed = false;
+
         foreach (PlayerHandle handle in handles)
         {
+            bool existed = Totals.ContainsKey(handle.PlayerKey);
             PlayerDamageSnapshot snapshot = GetOrCreate(handle);
-            ApplyHandle(snapshot, handle);
+            changed |= !existed;
+            changed |= ApplyHandle(snapshot, handle);
         }
+
+        return changed;
+    }
+
+    private static List<PlayerHandle> CollectKnownPlayers(params object?[] sources)
+    {
+        Dictionary<ulong, PlayerHandle> handlesByKey = new();
+
+        foreach (object? source in sources)
+        {
+            if (source == null)
+                continue;
+
+            foreach (PlayerHandle handle in ReflectionHelpers.EnumeratePlayerHandles(source))
+            {
+                handlesByKey[handle.PlayerKey] = handle;
+            }
+        }
+
+        return handlesByKey.Values.ToList();
     }
 
     public static string Format(decimal value)
